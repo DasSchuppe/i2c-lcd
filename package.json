@@ -1,0 +1,15 @@
+{
+  "name": "qapass-lcd-service",
+  "version": "1.0.0",
+  "description": "Standalone service to show Volumio playback info on QAPASS 1602 I2C LCD",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "i2c-lcd": "git+https://github.com/DasSchuppe/i2c-lcd.git",
+    "socket.io-client": "^4.8.1"
+  },
+  "author": "DasSchuppe",
+  "license": "MIT"
+}
