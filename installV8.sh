@@ -61,7 +61,7 @@ class LCM1602 {
     this.sendCommand(LCD_FUNCTION_SET);
     this.sendCommand(LCD_DISPLAY_ON);
     this.sendCommand(LCD_CLEAR_DISPLAY);
-    this.sleep(50); // LCM1602 braucht etwas Pause nach Clear
+    this.sleep(50); // Clear braucht Pause
     this.sendCommand(LCD_ENTRY_MODE_SET);
   }
 
@@ -77,9 +77,9 @@ class LCM1602 {
 
   writeNibble(bits) {
     this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
-    this.sleep(5);
+    this.sleep(2);
     this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
-    this.sleep(5);
+    this.sleep(2);
   }
 
   sleep(ms) { const end = Date.now() + ms; while(Date.now() < end); }
@@ -92,15 +92,15 @@ class LCM1602 {
   }
 
   print(text, line = 0) {
-    text = text.toString().padEnd(this.cols).slice(0, this.cols);
+    text = text.replace(/[^\x20-\x7E]/g,'').padEnd(this.cols).slice(0,this.cols);
     this.setCursor(line, 0);
-    for (let i = 0; i < text.length; i++) { this.sendData(text[i]); }
+    for (let i=0; i<text.length; i++) this.sendData(text[i]);
   }
 
   showWelcome() {
     this.clear();
-    this.print(' Willkommen bei   ', 0);
-    this.print('    Volumio!     ', 1);
+    this.print(' Willkommen bei   ',0);
+    this.print('    Volumio!     ',1);
   }
 
   shutdown() {
@@ -126,10 +126,6 @@ lcd.showWelcome();
 let lastTitle = '';
 let lastArtist = '';
 
-function safeText(text) {
-  return text.replace(/[^\x20-\x7E]/g,'').padEnd(16).slice(0,16);
-}
-
 parentPort.on('message', state => {
   const title = state.title || '';
   const artist = state.artist || '';
@@ -140,8 +136,8 @@ parentPort.on('message', state => {
   lastArtist = artist;
 
   lcd.clear();
-  if(title) lcd.print(safeText(title), 0);
-  if(artist) lcd.print(safeText(artist), 1);
+  if(title) lcd.print(title,0);
+  if(artist) lcd.print(artist,1);
 });
 JS
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/lcd-worker.js
