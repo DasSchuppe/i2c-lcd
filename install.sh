@@ -32,7 +32,7 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 JSON
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/package.json
 
-# 3) lib/lcd.js mit korrektem 4-Bit Init
+# 3) lib/lcd.js mit sauberem 4-Bit Init für LCM1602
 sudo tee $WORKDIR/lib/lcd.js > /dev/null <<'JS'
 'use strict';
 const i2c = require('i2c-bus');
@@ -62,22 +62,23 @@ class LCM1602 {
   async init() {
     this.bus = i2c.openSync(1);
 
-    // === Initialisierung für 4-Bit Modus ===
+    // === Initialisierung nach HD44780-Datenblatt für 4-Bit ===
     await sleep(50);
-    await this.sendByte(0x30, LCD_CMD);
+    await this.sendNibble(0x30);
     await sleep(5);
-    await this.sendByte(0x30, LCD_CMD);
+    await this.sendNibble(0x30);
     await sleep(5);
-    await this.sendByte(0x30, LCD_CMD);
+    await this.sendNibble(0x30);
     await sleep(5);
-    await this.sendByte(0x20, LCD_CMD); // Wechsel in 4-Bit
+    await this.sendNibble(0x20); // Wechsel in 4-Bit-Modus
+    await sleep(5);
 
     // Standard-Setup
-    await this.sendCommand(LCD_FUNCTION_SET);
-    await this.sendCommand(LCD_DISPLAY_ON);
-    await this.sendCommand(LCD_CLEAR_DISPLAY);
+    await this.sendCommand(LCD_FUNCTION_SET);  // 4-bit, 2 Zeilen, 5x8 Font
+    await this.sendCommand(LCD_DISPLAY_ON);    // Display an, Cursor aus
+    await this.sendCommand(LCD_CLEAR_DISPLAY); // Display löschen
     await sleep(5);
-    await this.sendCommand(LCD_ENTRY_MODE_SET);
+    await this.sendCommand(LCD_ENTRY_MODE_SET);// Cursor bewegt sich nach rechts
   }
 
   async sendCommand(cmd) { await this.sendByte(cmd, LCD_CMD); }
@@ -90,14 +91,25 @@ class LCM1602 {
     await this.writeNibble(low);
   }
 
-  async writeNibble(bits) {
+  async sendNibble(nibble) {
+    const bits = (nibble & 0xF0) | LCD_BACKLIGHT;
     this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
-    await sleep(2);
+    await sleep(5);
     this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
-    await sleep(2);
+    await sleep(5);
   }
 
-  async clear() { await this.sendCommand(LCD_CLEAR_DISPLAY); await sleep(50); }
+  async writeNibble(bits) {
+    this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
+    await sleep(5);
+    this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
+    await sleep(5);
+  }
+
+  async clear() { 
+    await this.sendCommand(LCD_CLEAR_DISPLAY); 
+    await sleep(5); 
+  }
 
   async setCursor(line, col) {
     const rowOffsets = [0x00, 0x40, 0x14, 0x54];
