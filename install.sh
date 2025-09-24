@@ -4,7 +4,7 @@ set -e
 WORKDIR="/opt/qapass-lcd"
 VOLUSER="volumio"
 
-echo "=== QAPASS / LCM1602 LCD Service Installer (Polling) ==="
+echo "=== QAPASS / LCM1602 LCD Service Installer (Polling, saubere Version mit 4-Bit Init) ==="
 echo "Arbeitsverzeichnis: $WORKDIR"
 echo "User: $VOLUSER"
 
@@ -32,7 +32,7 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 JSON
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/package.json
 
-# 3) lib/lcd.js mit sauberem 4-Bit Init für LCM1602
+# 3) lib/lcd.js mit korrektem 4-Bit Init und sauberem Timing
 sudo tee $WORKDIR/lib/lcd.js > /dev/null <<'JS'
 'use strict';
 const i2c = require('i2c-bus');
@@ -62,23 +62,22 @@ class LCM1602 {
   async init() {
     this.bus = i2c.openSync(1);
 
-    // === Initialisierung nach HD44780-Datenblatt für 4-Bit ===
+    // === Initialisierung für 4-Bit Modus (gemäß HD44780 Datenblatt) ===
     await sleep(50);
-    await this.sendNibble(0x30);
+    await this.writeNibble(0x30);
     await sleep(5);
-    await this.sendNibble(0x30);
+    await this.writeNibble(0x30);
     await sleep(5);
-    await this.sendNibble(0x30);
+    await this.writeNibble(0x30);
     await sleep(5);
-    await this.sendNibble(0x20); // Wechsel in 4-Bit-Modus
-    await sleep(5);
+    await this.writeNibble(0x20); // 4-Bit Modus
 
     // Standard-Setup
-    await this.sendCommand(LCD_FUNCTION_SET);  // 4-bit, 2 Zeilen, 5x8 Font
-    await this.sendCommand(LCD_DISPLAY_ON);    // Display an, Cursor aus
-    await this.sendCommand(LCD_CLEAR_DISPLAY); // Display löschen
+    await this.sendCommand(LCD_FUNCTION_SET);
+    await this.sendCommand(LCD_DISPLAY_ON);
+    await this.sendCommand(LCD_CLEAR_DISPLAY);
     await sleep(5);
-    await this.sendCommand(LCD_ENTRY_MODE_SET);// Cursor bewegt sich nach rechts
+    await this.sendCommand(LCD_ENTRY_MODE_SET);
   }
 
   async sendCommand(cmd) { await this.sendByte(cmd, LCD_CMD); }
@@ -91,25 +90,14 @@ class LCM1602 {
     await this.writeNibble(low);
   }
 
-  async sendNibble(nibble) {
-    const bits = (nibble & 0xF0) | LCD_BACKLIGHT;
-    this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
-    await sleep(5);
-    this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
-    await sleep(5);
-  }
-
   async writeNibble(bits) {
     this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
-    await sleep(5);
+    await sleep(2);
     this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
-    await sleep(5);
+    await sleep(2);
   }
 
-  async clear() { 
-    await this.sendCommand(LCD_CLEAR_DISPLAY); 
-    await sleep(5); 
-  }
+  async clear() { await this.sendCommand(LCD_CLEAR_DISPLAY); await sleep(50); }
 
   async setCursor(line, col) {
     const rowOffsets = [0x00, 0x40, 0x14, 0x54];
@@ -140,7 +128,7 @@ module.exports = LCM1602;
 JS
 sudo chown -R $VOLUSER:$VOLUSER $WORKDIR/lib
 
-# 4) index.js (Polling alle 5 Sekunden)
+# 4) index.js (Polling alle 5 Sekunden, getrennt wie "Thread")
 sudo tee $WORKDIR/index.js > /dev/null <<'JS'
 'use strict';
 const LCM1602 = require('./lib/lcd');
@@ -166,19 +154,19 @@ const fetch = require('node-fetch');
       const title = state.title || '';
       const artist = state.artist || '';
 
-      if(title !== lastTitle || artist !== lastArtist) {
+      if (title !== lastTitle || artist !== lastArtist) {
         lastTitle = title;
         lastArtist = artist;
         await lcd.clear();
-        if(title) await lcd.print(safeText(title),0);
-        if(artist) await lcd.print(safeText(artist),1);
+        if (title) await lcd.print(safeText(title),0);
+        if (artist) await lcd.print(safeText(artist),1);
       }
-    } catch(err) {
+    } catch (err) {
       console.log('Error fetching state:', err);
     }
   }
 
-  // alle 5 Sekunden aktualisieren
+  // Polling-Loop (quasi "Thread")
   setInterval(updateLCD, 5000);
 })();
 JS
