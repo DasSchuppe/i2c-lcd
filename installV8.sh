@@ -159,12 +159,10 @@ function updateLCD(state) {
 }
 
 // sofort aktuellen Status von Volumio abrufen
-setTimeout(() => {
-  fetch('http://localhost:3000/api/v1/getState')
-    .then(res => res.json())
-    .then(state => updateLCD(state))
-    .catch(err => console.log('Error fetching current state:', err));
-}, 10000);
+fetch('http://localhost:3000/api/v1/getState')
+  .then(res => res.json())
+  .then(state => updateLCD(state))
+  .catch(err => console.log('Error fetching current state:', err));
 
 // Volumio Socket.io
 const socket = io('http://localhost:3000', {transports: ['websocket']});
