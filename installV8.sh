@@ -61,7 +61,7 @@ class LCM1602 {
     this.sendCommand(LCD_FUNCTION_SET);
     this.sendCommand(LCD_DISPLAY_ON);
     this.sendCommand(LCD_CLEAR_DISPLAY);
-    this.sleep(50); // Clear braucht Pause
+    this.sleep(100); // Clear braucht Pause
     this.sendCommand(LCD_ENTRY_MODE_SET);
   }
 
@@ -77,14 +77,14 @@ class LCM1602 {
 
   writeNibble(bits) {
     this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
-    this.sleep(2);
+    this.sleep(5);
     this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
-    this.sleep(2);
+    this.sleep(5);
   }
 
   sleep(ms) { const end = Date.now() + ms; while(Date.now() < end); }
 
-  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); this.sleep(50); }
+  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); this.sleep(100); }
 
   setCursor(line, col) {
     const rowOffsets = [0x00, 0x40, 0x14, 0x54];
@@ -113,71 +113,64 @@ module.exports = LCM1602;
 JS
 sudo chown -R $VOLUSER:$VOLUSER $WORKDIR/lib
 
-# 4) lcd-worker.js
-sudo tee $WORKDIR/lcd-worker.js > /dev/null <<'JS'
+# 4) index.js
+sudo tee $WORKDIR/index.js > /dev/null <<'JS'
 'use strict';
-const { parentPort } = require('worker_threads');
 const LCM1602 = require('./lib/lcd');
+const io = require('socket.io-client');
+const fetch = require('node-fetch');
 
 const lcd = new LCM1602();
 lcd.init();
 lcd.showWelcome();
 
+let welcomeDone = false;
 let lastTitle = '';
 let lastArtist = '';
 
-parentPort.on('message', state => {
+function safeText(text) {
+  return text.replace(/[^\x20-\x7E]/g,'').padEnd(16).slice(0,16);
+}
+
+function updateLCD(state) {
   const title = state.title || '';
   const artist = state.artist || '';
 
-  if (title === lastTitle && artist === lastArtist) return;
+  if(title === lastTitle && artist === lastArtist) return;
 
   lastTitle = title;
   lastArtist = artist;
 
   lcd.clear();
-  if(title) lcd.print(title,0);
-  if(artist) lcd.print(artist,1);
-});
-JS
-sudo chown $VOLUSER:$VOLUSER $WORKDIR/lcd-worker.js
+  if(title) lcd.print(safeText(title), 0);
+  if(artist) lcd.print(safeText(artist), 1);
+}
 
-# 5) index.js
-sudo tee $WORKDIR/index.js > /dev/null <<'JS'
-'use strict';
-const { Worker } = require('worker_threads');
-const io = require('socket.io-client');
-const fetch = require('node-fetch');
-
-const worker = new Worker('./lcd-worker.js');
-worker.on('error', console.error);
-worker.on('exit', code => console.log('LCD Worker exit', code));
-
-let welcomeDone = false;
-
+// Welcome 20 Sekunden
 setTimeout(() => {
   welcomeDone = true;
   fetch('http://localhost:3000/api/v1/getState')
     .then(res => res.json())
-    .then(state => worker.postMessage(state))
+    .then(state => updateLCD(state))
     .catch(err => console.log('Error fetching current state:', err));
 }, 20000);
 
 const socket = io('http://localhost:3000', {transports: ['websocket']});
 socket.on('pushState', state => {
-  if(welcomeDone) worker.postMessage(state);
+  if(welcomeDone) updateLCD(state);
 });
 
 process.on('SIGINT', () => {
-  worker.terminate();
+  lcd.shutdown();
+  process.exit();
 });
 JS
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/index.js
 
-# 6) Node-Module installieren
+# 5) Node-Module installieren
 sudo -u $VOLUSER npm install --prefix $WORKDIR --production
 
-# 7) systemd Service
+# 6) systemd Service
 sudo tee /etc/systemd/system/qapass-lcd.service > /dev/null <<'SERVICE'
 [Unit]
 Description=QAPASS / LCM1602 I2C LCD Service
@@ -196,7 +189,7 @@ Nice=10
 WantedBy=multi-user.target
 SERVICE
 
-# 8) Service aktivieren und starten
+# 7) Service aktivieren und starten
 sudo systemctl daemon-reload
 sudo systemctl enable qapass-lcd.service
 sudo systemctl restart qapass-lcd.service
