@@ -32,7 +32,7 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 JSON
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/package.json
 
-# 3) lib/lcd.js
+# 3) lib/lcd.js mit korrektem 4-Bit Init
 sudo tee $WORKDIR/lib/lcd.js > /dev/null <<'JS'
 'use strict';
 const i2c = require('i2c-bus');
@@ -61,10 +61,22 @@ class LCM1602 {
 
   async init() {
     this.bus = i2c.openSync(1);
+
+    // === Initialisierung für 4-Bit Modus ===
+    await sleep(50);
+    await this.sendByte(0x30, LCD_CMD);
+    await sleep(5);
+    await this.sendByte(0x30, LCD_CMD);
+    await sleep(5);
+    await this.sendByte(0x30, LCD_CMD);
+    await sleep(5);
+    await this.sendByte(0x20, LCD_CMD); // Wechsel in 4-Bit
+
+    // Standard-Setup
     await this.sendCommand(LCD_FUNCTION_SET);
     await this.sendCommand(LCD_DISPLAY_ON);
     await this.sendCommand(LCD_CLEAR_DISPLAY);
-    await sleep(50);
+    await sleep(5);
     await this.sendCommand(LCD_ENTRY_MODE_SET);
   }
 
