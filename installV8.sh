@@ -76,10 +76,12 @@ class LCM1602 {
 
   writeNibble(bits) {
     this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
+    const t1 = Date.now() + 1; while(Date.now() < t1);
     this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
+    const t2 = Date.now() + 1; while(Date.now() < t2);
   }
 
-  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); }
+  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); const t = Date.now()+2; while(Date.now()<t); }
 
   setCursor(line, col) {
     const rowOffsets = [0x00, 0x40, 0x14, 0x54];
@@ -123,18 +125,25 @@ let welcomeDone = false;
 let lastTitle = '';
 let lastArtist = '';
 
+// Funktion zum sicheren Beschreiben des Displays
+function safeText(text) {
+  return text.replace(/[^\x20-\x7E]/g,'').padEnd(16).slice(0,16);
+}
+
 // Funktion zum Aktualisieren des Displays
 function updateLCD(state) {
-  // Nur aktualisieren, wenn sich Titel/Artist geändert haben
-  if(state.title === lastTitle && state.artist === lastArtist) return;
+  const title = state.title || '';
+  const artist = state.artist || '';
 
-  lastTitle = state.title || '';
-  lastArtist = state.artist || '';
+  // Nur aktualisieren, wenn sich Text geändert hat
+  if(title === lastTitle && artist === lastArtist) return;
+
+  lastTitle = title;
+  lastArtist = artist;
 
   lcd.clear();
-
-  if(state.title) lcd.print(state.title, 0);
-  if(state.artist) lcd.print(state.artist, 1);
+  if(title) lcd.print(safeText(title), 0);
+  if(artist) lcd.print(safeText(artist), 1);
 }
 
 // Welcome-Screen 20 Sekunden anzeigen, dann erstes Update
