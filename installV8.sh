@@ -135,29 +135,34 @@ lcd.init();
 lcd.showWelcome();
 
 let scrollInterval = [];
-let welcomeDone = false;
 
-// Wechsel auf Songinfo nach 10 Sekunden
+// Funktion zum Aktualisieren des Displays
+function updateLCD(state) {
+  // Alte Scroll-Intervalle stoppen
+  if(scrollInterval.length) scrollInterval.forEach(i => clearInterval(i));
+  scrollInterval = [];
+
+  lcd.clear();
+
+  if(state.status === 'play') {
+    // Titel in Zeile 0, Artist in Zeile 1
+    if(state.title && state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0));
+    else lcd.print(state.title || '', 0);
+
+    if(state.artist && state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1));
+    else lcd.print(state.artist || '', 1);
+
+  } else {
+    lcd.print('Pause',0);
+    lcd.print('',1); // zweite Zeile leer
+  }
+}
+
+// sofort aktuellen Status von Volumio abrufen
 setTimeout(() => {
-  welcomeDone = true;
-
-  // sofort aktuellen Status von Volumio abrufen
   fetch('http://localhost:3000/api/v1/getState')
     .then(res => res.json())
-    .then(state => {
-      if(state.status === 'play') {
-        if(scrollInterval.length) scrollInterval.forEach(i => clearInterval(i));
-        lcd.clear();
-        scrollInterval = [];
-        if(state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0));
-        else lcd.print(state.title, 0);
-        if(state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1));
-        else lcd.print(state.artist, 1);
-      } else {
-        lcd.clear();
-        lcd.print('Pause',0);
-      }
-    })
+    .then(state => updateLCD(state))
     .catch(err => console.log('Error fetching current state:', err));
 }, 10000);
 
@@ -168,19 +173,7 @@ socket.on('connect', () => console.log('Connected to Volumio'));
 socket.on('connect_error', (err) => console.log('Socket.io connection error:', err));
 
 socket.on('pushState', (state) => {
-  if(!welcomeDone) return;
-  if(scrollInterval.length) scrollInterval.forEach(i => clearInterval(i));
-  scrollInterval = [];
-
-  if(state.status === 'play') {
-    if(state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0));
-    else lcd.print(state.title, 0);
-    if(state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1));
-    else lcd.print(state.artist, 1);
-  } else {
-    lcd.clear();
-    lcd.print('Pause',0);
-  }
+  updateLCD(state);
 });
 
 process.on('SIGINT', () => { 
