@@ -4,7 +4,7 @@ set -e
 WORKDIR="/opt/qapass-lcd"
 VOLUSER="volumio"
 
-echo "=== QAPASS / LCM1602 LCD Service Installer ==="
+echo "=== QAPASS / LCM1602 LCD Service Installer (Worker Thread) ==="
 echo "Arbeitsverzeichnis: $WORKDIR"
 echo "User: $VOLUSER"
 
@@ -33,7 +33,7 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 JSON
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/package.json
 
-# 3) lib/lcd.js (non-blocking)
+# 3) lib/lcd.js (Worker-kompatibel)
 sudo tee $WORKDIR/lib/lcd.js > /dev/null <<'JS'
 'use strict';
 const i2c = require('i2c-bus');
@@ -117,19 +117,17 @@ module.exports = LCM1602;
 JS
 sudo chown -R $VOLUSER:$VOLUSER $WORKDIR/lib
 
-# 4) index.js (async LCD)
-sudo tee $WORKDIR/index.js > /dev/null <<'JS'
+# 4) lcd-worker.js
+sudo tee $WORKDIR/lcd-worker.js > /dev/null <<'JS'
 'use strict';
+const { parentPort } = require('worker_threads');
 const LCM1602 = require('./lib/lcd');
-const io = require('socket.io-client');
-const fetch = require('node-fetch');
 
 (async () => {
   const lcd = new LCM1602();
   await lcd.init();
   await lcd.showWelcome();
 
-  let welcomeDone = false;
   let lastTitle = '';
   let lastArtist = '';
 
@@ -137,7 +135,7 @@ const fetch = require('node-fetch');
     return text.replace(/[^\x20-\x7E]/g,'').padEnd(16).slice(0,16);
   }
 
-  async function updateLCD(state) {
+  parentPort.on('message', async state => {
     const title = state.title || '';
     const artist = state.artist || '';
 
@@ -147,39 +145,54 @@ const fetch = require('node-fetch');
     lastArtist = artist;
 
     await lcd.clear();
-    if(title) await lcd.print(safeText(title), 0);
-    if(artist) await lcd.print(safeText(artist), 1);
-  }
-
-  // Welcome 20 Sekunden
-  setTimeout(async () => {
-    welcomeDone = true;
-    try {
-      const res = await fetch('http://localhost:3000/api/v1/getState');
-      const state = await res.json();
-      await updateLCD(state);
-    } catch(err) {
-      console.log('Error fetching current state:', err);
-    }
-  }, 20000);
-
-  const socket = io('http://localhost:3000', {transports: ['websocket']});
-  socket.on('pushState', async state => {
-    if(welcomeDone) await updateLCD(state);
-  });
-
-  process.on('SIGINT', async () => {
-    await lcd.shutdown();
-    process.exit();
+    if(title) await lcd.print(safeText(title),0);
+    if(artist) await lcd.print(safeText(artist),1);
   });
 })();
 JS
+sudo chown $VOLUSER:$VOLUSER $WORKDIR/lcd-worker.js
+
+# 5) index.js
+sudo tee $WORKDIR/index.js > /dev/null <<'JS'
+'use strict';
+const { Worker } = require('worker_threads');
+const io = require('socket.io-client');
+const fetch = require('node-fetch');
+
+const worker = new Worker('./lcd-worker.js');
+worker.on('error', console.error);
+worker.on('exit', code => console.log('LCD Worker exit', code));
+
+let welcomeDone = false;
+
+// Welcome 20 Sekunden
+setTimeout(async () => {
+  welcomeDone = true;
+  try {
+    const res = await fetch('http://localhost:3000/api/v1/getState');
+    const state = await res.json();
+    worker.postMessage(state);
+  } catch(err) {
+    console.log('Error fetching current state:', err);
+  }
+}, 20000);
+
+const socket = io('http://localhost:3000', {transports: ['websocket']});
+socket.on('pushState', state => {
+  if(welcomeDone) worker.postMessage(state);
+});
+
+process.on('SIGINT', () => {
+  worker.terminate();
+  process.exit();
+});
+JS
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/index.js
 
-# 5) Node-Module installieren
+# 6) Node-Module installieren
 sudo -u $VOLUSER npm install --prefix $WORKDIR --production
 
-# 6) systemd Service
+# 7) systemd Service
 sudo tee /etc/systemd/system/qapass-lcd.service > /dev/null <<'SERVICE'
 [Unit]
 Description=QAPASS / LCM1602 I2C LCD Service
@@ -198,7 +211,7 @@ Nice=10
 WantedBy=multi-user.target
 SERVICE
 
-# 7) Service aktivieren und starten
+# 8) Service aktivieren und starten
 sudo systemctl daemon-reload
 sudo systemctl enable qapass-lcd.service
 sudo systemctl restart qapass-lcd.service
