@@ -24,7 +24,8 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
   },
   "dependencies": {
     "i2c-bus": "^5.2.2",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "node-fetch": "^2.6.7"
   },
   "author": "DasSchuppe",
   "license": "MIT"
@@ -127,6 +128,7 @@ sudo tee $WORKDIR/index.js > /dev/null <<'JS'
 'use strict';
 const LCM1602 = require('./lib/lcd');
 const io = require('socket.io-client');
+const fetch = require('node-fetch');
 
 const lcd = new LCM1602();
 lcd.init();
@@ -138,6 +140,21 @@ let welcomeDone = false;
 // Wechsel auf Songinfo nach 10 Sekunden
 setTimeout(() => {
   welcomeDone = true;
+
+  // sofort aktuellen Status von Volumio abrufen
+  fetch('http://localhost:3000/api/v1/getState')
+    .then(res => res.json())
+    .then(state => {
+      if(state.status === 'play') {
+        if(scrollInterval) clearInterval(scrollInterval);
+        lcd.clear();
+        scrollInterval = lcd.scrollText(`${state.artist} - ${state.title}`, 0);
+      } else {
+        lcd.clear();
+        lcd.print('Pause',0);
+      }
+    })
+    .catch(err => console.log('Error fetching current state:', err));
 }, 10000);
 
 // Volumio Socket.io
