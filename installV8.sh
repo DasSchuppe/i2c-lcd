@@ -61,7 +61,7 @@ class LCM1602 {
     this.sendCommand(LCD_FUNCTION_SET);
     this.sendCommand(LCD_DISPLAY_ON);
     this.sendCommand(LCD_CLEAR_DISPLAY);
-    this.sleep(5);
+    this.sleep(50); // LCM1602 braucht etwas Pause nach Clear
     this.sendCommand(LCD_ENTRY_MODE_SET);
   }
 
@@ -82,9 +82,9 @@ class LCM1602 {
     this.sleep(5);
   }
 
-  sleep(ms) { const end=Date.now()+ms; while(Date.now()<end); }
+  sleep(ms) { const end = Date.now() + ms; while(Date.now() < end); }
 
-  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); this.sleep(5); }
+  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); this.sleep(50); }
 
   setCursor(line, col) {
     const rowOffsets = [0x00, 0x40, 0x14, 0x54];
@@ -94,18 +94,18 @@ class LCM1602 {
   print(text, line = 0) {
     text = text.toString().padEnd(this.cols).slice(0, this.cols);
     this.setCursor(line, 0);
-    for(let i=0;i<text.length;i++){this.sendData(text[i]);}
+    for (let i = 0; i < text.length; i++) { this.sendData(text[i]); }
   }
 
   showWelcome() {
     this.clear();
-    this.print(' Willkommen bei   ',0);
-    this.print('    Volumio!     ',1);
+    this.print(' Willkommen bei   ', 0);
+    this.print('    Volumio!     ', 1);
   }
 
   shutdown() {
     this.clear();
-    if(this.bus){this.bus.closeSync(); this.bus=null;}
+    if (this.bus) { this.bus.closeSync(); this.bus = null; }
   }
 }
 
@@ -113,18 +113,16 @@ module.exports = LCM1602;
 JS
 sudo chown -R $VOLUSER:$VOLUSER $WORKDIR/lib
 
-# 4) index.js
-sudo tee $WORKDIR/index.js > /dev/null <<'JS'
+# 4) lcd-worker.js
+sudo tee $WORKDIR/lcd-worker.js > /dev/null <<'JS'
 'use strict';
+const { parentPort } = require('worker_threads');
 const LCM1602 = require('./lib/lcd');
-const io = require('socket.io-client');
-const fetch = require('node-fetch');
 
 const lcd = new LCM1602();
 lcd.init();
 lcd.showWelcome();
 
-let welcomeDone = false;
 let lastTitle = '';
 let lastArtist = '';
 
@@ -132,11 +130,11 @@ function safeText(text) {
   return text.replace(/[^\x20-\x7E]/g,'').padEnd(16).slice(0,16);
 }
 
-function updateLCD(state) {
+parentPort.on('message', state => {
   const title = state.title || '';
   const artist = state.artist || '';
 
-  if(title === lastTitle && artist === lastArtist) return;
+  if (title === lastTitle && artist === lastArtist) return;
 
   lastTitle = title;
   lastArtist = artist;
@@ -144,34 +142,46 @@ function updateLCD(state) {
   lcd.clear();
   if(title) lcd.print(safeText(title), 0);
   if(artist) lcd.print(safeText(artist), 1);
-}
+});
+JS
+sudo chown $VOLUSER:$VOLUSER $WORKDIR/lcd-worker.js
+
+# 5) index.js
+sudo tee $WORKDIR/index.js > /dev/null <<'JS'
+'use strict';
+const { Worker } = require('worker_threads');
+const io = require('socket.io-client');
+const fetch = require('node-fetch');
+
+const worker = new Worker('./lcd-worker.js');
+worker.on('error', console.error);
+worker.on('exit', code => console.log('LCD Worker exit', code));
+
+let welcomeDone = false;
 
 setTimeout(() => {
   welcomeDone = true;
   fetch('http://localhost:3000/api/v1/getState')
     .then(res => res.json())
-    .then(state => updateLCD(state))
+    .then(state => worker.postMessage(state))
     .catch(err => console.log('Error fetching current state:', err));
 }, 20000);
 
 const socket = io('http://localhost:3000', {transports: ['websocket']});
-socket.on('connect', () => console.log('Connected to Volumio'));
-socket.on('connect_error', (err) => console.log('Socket.io connection error:', err));
-socket.on('pushState', (state) => {
-  if(welcomeDone) updateLCD(state);
+socket.on('pushState', state => {
+  if(welcomeDone) worker.postMessage(state);
 });
 
-process.on('SIGINT', () => { 
-  lcd.shutdown(); 
-  process.exit(); 
+process.on('SIGINT', () => {
+  worker.terminate();
 });
 JS
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/index.js
 
-# 5) Node-Module installieren
+# 6) Node-Module installieren
 sudo -u $VOLUSER npm install --prefix $WORKDIR --production
 
-# 6) systemd Service
+# 7) systemd Service
 sudo tee /etc/systemd/system/qapass-lcd.service > /dev/null <<'SERVICE'
 [Unit]
 Description=QAPASS / LCM1602 I2C LCD Service
@@ -183,12 +193,14 @@ WorkingDirectory=/opt/qapass-lcd
 Restart=always
 User=volumio
 Group=volumio
+CPUQuota=30%
+Nice=10
 
 [Install]
 WantedBy=multi-user.target
 SERVICE
 
-# 7) Service aktivieren und starten
+# 8) Service aktivieren und starten
 sudo systemctl daemon-reload
 sudo systemctl enable qapass-lcd.service
 sudo systemctl restart qapass-lcd.service
