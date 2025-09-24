@@ -61,6 +61,7 @@ class LCM1602 {
     this.sendCommand(LCD_FUNCTION_SET);
     this.sendCommand(LCD_DISPLAY_ON);
     this.sendCommand(LCD_CLEAR_DISPLAY);
+    this.sleep(5);
     this.sendCommand(LCD_ENTRY_MODE_SET);
   }
 
@@ -76,12 +77,14 @@ class LCM1602 {
 
   writeNibble(bits) {
     this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
-    const t1 = Date.now() + 1; while(Date.now() < t1);
+    this.sleep(5);
     this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
-    const t2 = Date.now() + 1; while(Date.now() < t2);
+    this.sleep(5);
   }
 
-  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); const t = Date.now()+2; while(Date.now()<t); }
+  sleep(ms) { const end=Date.now()+ms; while(Date.now()<end); }
+
+  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); this.sleep(5); }
 
   setCursor(line, col) {
     const rowOffsets = [0x00, 0x40, 0x14, 0x54];
@@ -125,17 +128,14 @@ let welcomeDone = false;
 let lastTitle = '';
 let lastArtist = '';
 
-// Funktion zum sicheren Beschreiben des Displays
 function safeText(text) {
   return text.replace(/[^\x20-\x7E]/g,'').padEnd(16).slice(0,16);
 }
 
-// Funktion zum Aktualisieren des Displays
 function updateLCD(state) {
   const title = state.title || '';
   const artist = state.artist || '';
 
-  // Nur aktualisieren, wenn sich Text geändert hat
   if(title === lastTitle && artist === lastArtist) return;
 
   lastTitle = title;
@@ -146,7 +146,6 @@ function updateLCD(state) {
   if(artist) lcd.print(safeText(artist), 1);
 }
 
-// Welcome-Screen 20 Sekunden anzeigen, dann erstes Update
 setTimeout(() => {
   welcomeDone = true;
   fetch('http://localhost:3000/api/v1/getState')
@@ -155,7 +154,6 @@ setTimeout(() => {
     .catch(err => console.log('Error fetching current state:', err));
 }, 20000);
 
-// Volumio Socket.io Updates nur nach Welcome
 const socket = io('http://localhost:3000', {transports: ['websocket']});
 socket.on('connect', () => console.log('Connected to Volumio'));
 socket.on('connect_error', (err) => console.log('Socket.io connection error:', err));
