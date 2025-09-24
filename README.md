@@ -28,6 +28,7 @@ Display the current playback information from Volumio on a **16x2 I2C LCD (LCM16
 ```bash
 git clone https://github.com/<your-username>/qapass-lcd.git
 cd qapass-lcd
+sudo chmod +x install.sh
 sudo bash install.sh
 ```
 After installation, the service will automatically start and display track info.
