@@ -135,43 +135,42 @@ lcd.init();
 lcd.showWelcome();
 
 let scrollInterval = [];
+let welcomeDone = false;
 
 // Funktion zum Aktualisieren des Displays
 function updateLCD(state) {
-  // Alte Scroll-Intervalle stoppen
   if(scrollInterval.length) scrollInterval.forEach(i => clearInterval(i));
   scrollInterval = [];
 
   lcd.clear();
 
   if(state.status === 'play') {
-    // Titel in Zeile 0, Artist in Zeile 1
-    if(state.title && state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0));
+    if(state.title && state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0, 400));
     else lcd.print(state.title || '', 0);
 
-    if(state.artist && state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1));
+    if(state.artist && state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1, 400));
     else lcd.print(state.artist || '', 1);
-
   } else {
     lcd.print('Pause',0);
-    lcd.print('',1); // zweite Zeile leer
+    lcd.print('',1);
   }
 }
 
-// sofort aktuellen Status von Volumio abrufen
-fetch('http://localhost:3000/api/v1/getState')
-  .then(res => res.json())
-  .then(state => updateLCD(state))
-  .catch(err => console.log('Error fetching current state:', err));
+// Welcome-Screen 20 Sekunden anzeigen, dann erstes Update
+setTimeout(() => {
+  welcomeDone = true;
+  fetch('http://localhost:3000/api/v1/getState')
+    .then(res => res.json())
+    .then(state => updateLCD(state))
+    .catch(err => console.log('Error fetching current state:', err));
+}, 20000);
 
-// Volumio Socket.io
+// Volumio Socket.io Updates nur nach Welcome
 const socket = io('http://localhost:3000', {transports: ['websocket']});
-
 socket.on('connect', () => console.log('Connected to Volumio'));
 socket.on('connect_error', (err) => console.log('Socket.io connection error:', err));
-
 socket.on('pushState', (state) => {
-  updateLCD(state);
+  if(welcomeDone) updateLCD(state);
 });
 
 process.on('SIGINT', () => { 
