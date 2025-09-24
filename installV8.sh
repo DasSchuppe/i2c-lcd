@@ -33,7 +33,7 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 JSON
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/package.json
 
-# 3) lib/lcd.js
+# 3) lib/lcd.js (non-blocking)
 sudo tee $WORKDIR/lib/lcd.js > /dev/null <<'JS'
 'use strict';
 const i2c = require('i2c-bus');
@@ -48,6 +48,10 @@ const LCD_ENTRY_MODE_SET = 0x06;
 const LCD_DISPLAY_ON = 0x0C;
 const LCD_FUNCTION_SET = 0x28;
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 class LCM1602 {
   constructor(addr = 0x27, rows = 2, cols = 16) {
     this.addr = addr;
@@ -56,55 +60,55 @@ class LCM1602 {
     this.bus = null;
   }
 
-  init() {
+  async init() {
     this.bus = i2c.openSync(1);
-    this.sendCommand(LCD_FUNCTION_SET);
-    this.sendCommand(LCD_DISPLAY_ON);
-    this.sendCommand(LCD_CLEAR_DISPLAY);
-    this.sleep(100); // Clear braucht Pause
-    this.sendCommand(LCD_ENTRY_MODE_SET);
+    await this.sendCommand(LCD_FUNCTION_SET);
+    await this.sendCommand(LCD_DISPLAY_ON);
+    await this.sendCommand(LCD_CLEAR_DISPLAY);
+    await sleep(50);
+    await this.sendCommand(LCD_ENTRY_MODE_SET);
   }
 
-  sendCommand(cmd) { this.sendByte(cmd, LCD_CMD); }
-  sendData(data) { this.sendByte(data.charCodeAt(0), LCD_CHR); }
+  async sendCommand(cmd) { await this.sendByte(cmd, LCD_CMD); }
+  async sendData(data) { await this.sendByte(data.charCodeAt(0), LCD_CHR); }
 
-  sendByte(bits, mode) {
+  async sendByte(bits, mode) {
     const high = (bits & 0xF0) | mode | LCD_BACKLIGHT;
     const low = ((bits << 4) & 0xF0) | mode | LCD_BACKLIGHT;
-    this.writeNibble(high);
-    this.writeNibble(low);
+    await this.writeNibble(high);
+    await this.writeNibble(low);
   }
 
-  writeNibble(bits) {
+  async writeNibble(bits) {
     this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
-    this.sleep(5);
+    await sleep(2);
     this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
-    this.sleep(5);
+    await sleep(2);
   }
 
-  sleep(ms) { const end = Date.now() + ms; while(Date.now() < end); }
+  async clear() { await this.sendCommand(LCD_CLEAR_DISPLAY); await sleep(50); }
 
-  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); this.sleep(100); }
-
-  setCursor(line, col) {
+  async setCursor(line, col) {
     const rowOffsets = [0x00, 0x40, 0x14, 0x54];
-    this.sendCommand(0x80 | (col + rowOffsets[line]));
+    await this.sendCommand(0x80 | (col + rowOffsets[line]));
   }
 
-  print(text, line = 0) {
+  async print(text, line = 0) {
     text = text.replace(/[^\x20-\x7E]/g,'').padEnd(this.cols).slice(0,this.cols);
-    this.setCursor(line, 0);
-    for (let i=0; i<text.length; i++) this.sendData(text[i]);
+    await this.setCursor(line, 0);
+    for (let i=0; i<text.length; i++) {
+      await this.sendData(text[i]);
+    }
   }
 
-  showWelcome() {
-    this.clear();
-    this.print(' Willkommen bei   ',0);
-    this.print('    Volumio!     ',1);
+  async showWelcome() {
+    await this.clear();
+    await this.print(' Willkommen bei   ',0);
+    await this.print('    Volumio!     ',1);
   }
 
-  shutdown() {
-    this.clear();
+  async shutdown() {
+    await this.clear();
     if (this.bus) { this.bus.closeSync(); this.bus = null; }
   }
 }
@@ -113,57 +117,62 @@ module.exports = LCM1602;
 JS
 sudo chown -R $VOLUSER:$VOLUSER $WORKDIR/lib
 
-# 4) index.js
+# 4) index.js (async LCD)
 sudo tee $WORKDIR/index.js > /dev/null <<'JS'
 'use strict';
 const LCM1602 = require('./lib/lcd');
 const io = require('socket.io-client');
 const fetch = require('node-fetch');
 
-const lcd = new LCM1602();
-lcd.init();
-lcd.showWelcome();
+(async () => {
+  const lcd = new LCM1602();
+  await lcd.init();
+  await lcd.showWelcome();
 
-let welcomeDone = false;
-let lastTitle = '';
-let lastArtist = '';
+  let welcomeDone = false;
+  let lastTitle = '';
+  let lastArtist = '';
 
-function safeText(text) {
-  return text.replace(/[^\x20-\x7E]/g,'').padEnd(16).slice(0,16);
-}
+  function safeText(text) {
+    return text.replace(/[^\x20-\x7E]/g,'').padEnd(16).slice(0,16);
+  }
 
-function updateLCD(state) {
-  const title = state.title || '';
-  const artist = state.artist || '';
+  async function updateLCD(state) {
+    const title = state.title || '';
+    const artist = state.artist || '';
 
-  if(title === lastTitle && artist === lastArtist) return;
+    if(title === lastTitle && artist === lastArtist) return;
 
-  lastTitle = title;
-  lastArtist = artist;
+    lastTitle = title;
+    lastArtist = artist;
 
-  lcd.clear();
-  if(title) lcd.print(safeText(title), 0);
-  if(artist) lcd.print(safeText(artist), 1);
-}
+    await lcd.clear();
+    if(title) await lcd.print(safeText(title), 0);
+    if(artist) await lcd.print(safeText(artist), 1);
+  }
 
-// Welcome 20 Sekunden
-setTimeout(() => {
-  welcomeDone = true;
-  fetch('http://localhost:3000/api/v1/getState')
-    .then(res => res.json())
-    .then(state => updateLCD(state))
-    .catch(err => console.log('Error fetching current state:', err));
-}, 20000);
+  // Welcome 20 Sekunden
+  setTimeout(async () => {
+    welcomeDone = true;
+    try {
+      const res = await fetch('http://localhost:3000/api/v1/getState');
+      const state = await res.json();
+      await updateLCD(state);
+    } catch(err) {
+      console.log('Error fetching current state:', err);
+    }
+  }, 20000);
 
-const socket = io('http://localhost:3000', {transports: ['websocket']});
-socket.on('pushState', state => {
-  if(welcomeDone) updateLCD(state);
-});
+  const socket = io('http://localhost:3000', {transports: ['websocket']});
+  socket.on('pushState', async state => {
+    if(welcomeDone) await updateLCD(state);
+  });
 
-process.on('SIGINT', () => {
-  lcd.shutdown();
-  process.exit();
-});
+  process.on('SIGINT', async () => {
+    await lcd.shutdown();
+    process.exit();
+  });
+})();
 JS
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/index.js
 
