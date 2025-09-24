@@ -134,7 +134,7 @@ const lcd = new LCM1602();
 lcd.init();
 lcd.showWelcome();
 
-let scrollInterval = null;
+let scrollInterval = [];
 let welcomeDone = false;
 
 // Wechsel auf Songinfo nach 10 Sekunden
@@ -146,9 +146,13 @@ setTimeout(() => {
     .then(res => res.json())
     .then(state => {
       if(state.status === 'play') {
-        if(scrollInterval) clearInterval(scrollInterval);
+        if(scrollInterval.length) scrollInterval.forEach(i => clearInterval(i));
         lcd.clear();
-        scrollInterval = lcd.scrollText(`${state.artist} - ${state.title}`, 0);
+        scrollInterval = [];
+        if(state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0));
+        else lcd.print(state.title, 0);
+        if(state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1));
+        else lcd.print(state.artist, 1);
       } else {
         lcd.clear();
         lcd.print('Pause',0);
@@ -165,11 +169,14 @@ socket.on('connect_error', (err) => console.log('Socket.io connection error:', e
 
 socket.on('pushState', (state) => {
   if(!welcomeDone) return;
-  if(scrollInterval) clearInterval(scrollInterval);
+  if(scrollInterval.length) scrollInterval.forEach(i => clearInterval(i));
+  scrollInterval = [];
 
   if(state.status === 'play') {
-    lcd.clear();
-    scrollInterval = lcd.scrollText(`${state.artist} - ${state.title}`, 0);
+    if(state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0));
+    else lcd.print(state.title, 0);
+    if(state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1));
+    else lcd.print(state.artist, 1);
   } else {
     lcd.clear();
     lcd.print('Pause',0);
@@ -178,7 +185,7 @@ socket.on('pushState', (state) => {
 
 process.on('SIGINT', () => { 
   lcd.shutdown(); 
-  if(scrollInterval) clearInterval(scrollInterval);
+  if(scrollInterval.length) scrollInterval.forEach(i => clearInterval(i));
   process.exit(); 
 });
 JS
