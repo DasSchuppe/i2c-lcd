@@ -76,14 +76,10 @@ class LCM1602 {
 
   writeNibble(bits) {
     this.bus.writeByteSync(this.addr, 0, bits | ENABLE);
-    this.sleep(1);
     this.bus.writeByteSync(this.addr, 0, bits & ~ENABLE);
-    this.sleep(1);
   }
 
-  sleep(ms) { const end=Date.now()+ms; while(Date.now()<end); }
-
-  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); this.sleep(2); }
+  clear() { this.sendCommand(LCD_CLEAR_DISPLAY); }
 
   setCursor(line, col) {
     const rowOffsets = [0x00, 0x40, 0x14, 0x54];
@@ -94,17 +90,6 @@ class LCM1602 {
     text = text.toString().padEnd(this.cols).slice(0, this.cols);
     this.setCursor(line, 0);
     for(let i=0;i<text.length;i++){this.sendData(text[i]);}
-  }
-
-  scrollText(text, line = 0, delay = 400) {
-    text = text.toString().padEnd(this.cols+text.length);
-    let pos = 0;
-    const interval = setInterval(() => {
-      if(pos + this.cols > text.length){ pos = 0; }
-      this.print(text.substr(pos, this.cols), line);
-      pos++;
-    }, delay);
-    return interval;
   }
 
   showWelcome() {
@@ -134,25 +119,22 @@ const lcd = new LCM1602();
 lcd.init();
 lcd.showWelcome();
 
-let scrollInterval = [];
 let welcomeDone = false;
+let lastTitle = '';
+let lastArtist = '';
 
 // Funktion zum Aktualisieren des Displays
 function updateLCD(state) {
-  if(scrollInterval.length) scrollInterval.forEach(i => clearInterval(i));
-  scrollInterval = [];
+  // Nur aktualisieren, wenn sich Titel/Artist geändert haben
+  if(state.title === lastTitle && state.artist === lastArtist) return;
+
+  lastTitle = state.title || '';
+  lastArtist = state.artist || '';
 
   lcd.clear();
 
-  if(state.title) {
-    if(state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0, 400));
-    else lcd.print(state.title, 0);
-  }
-
-  if(state.artist) {
-    if(state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1, 400));
-    else lcd.print(state.artist, 1);
-  }
+  if(state.title) lcd.print(state.title, 0);
+  if(state.artist) lcd.print(state.artist, 1);
 }
 
 // Welcome-Screen 20 Sekunden anzeigen, dann erstes Update
@@ -174,7 +156,6 @@ socket.on('pushState', (state) => {
 
 process.on('SIGINT', () => { 
   lcd.shutdown(); 
-  if(scrollInterval.length) scrollInterval.forEach(i => clearInterval(i));
   process.exit(); 
 });
 JS
