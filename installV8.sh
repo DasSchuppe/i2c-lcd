@@ -144,15 +144,14 @@ function updateLCD(state) {
 
   lcd.clear();
 
-  if(state.status === 'play') {
-    if(state.title && state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0, 400));
-    else lcd.print(state.title || '', 0);
+  if(state.title) {
+    if(state.title.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.title, 0, 400));
+    else lcd.print(state.title, 0);
+  }
 
-    if(state.artist && state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1, 400));
-    else lcd.print(state.artist || '', 1);
-  } else {
-    lcd.print('Pause',0);
-    lcd.print('',1);
+  if(state.artist) {
+    if(state.artist.length > lcd.cols) scrollInterval.push(lcd.scrollText(state.artist, 1, 400));
+    else lcd.print(state.artist, 1);
   }
 }
 
