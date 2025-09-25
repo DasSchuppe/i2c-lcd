@@ -1,26 +1,22 @@
 #!/bin/bash
 set -e
 
-# Power-Button Script für Raspberry Pi
-# GPIO3: Hardware-Start (Pin 5, wird automatisch vom Pi genutzt)
-# GPIO17: Soft-Shutdown (Pin 11)
-
-WORKDIR="/opt/power-buttons"
+WORKDIR="/opt/shutdown-button"
 VOLUSER="volumio"
-SERVICE_NAME="power-buttons"
+SERVICE_NAME="shutdown-button"
 
-echo "=== Raspberry Pi Power Buttons Installer ==="
+echo "=== Raspberry Pi Shutdown Button Installer (GPIO17) ==="
 
-# 1) Verzeichnis anlegen
+# 1) Arbeitsverzeichnis anlegen
 sudo mkdir -p $WORKDIR
 sudo chown -R $VOLUSER:$VOLUSER $WORKDIR
 
 # 2) package.json
 sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 {
-  "name": "power-buttons",
+  "name": "shutdown-button",
   "version": "1.0.0",
-  "description": "Two-button control for Raspberry Pi: soft shutdown and hardware start",
+  "description": "Raspberry Pi shutdown button via GPIO17",
   "main": "index.js",
   "dependencies": {
     "onoff": "^6.0.0"
@@ -36,21 +32,28 @@ sudo tee $WORKDIR/index.js > /dev/null <<'JS'
 'use strict';
 
 const Gpio = require('onoff').Gpio;
+const { exec } = require('child_process');
 
-// GPIO17 als Shutdown-Taster (Pin 11)
+// GPIO17 (Pin 11) als Input mit Pullup
 const shutdownButton = new Gpio(17, 'in', 'falling', { debounceTimeout: 200 });
+
+console.log('Shutdown Button Service gestartet. GPIO17 überwacht.');
 
 shutdownButton.watch((err, value) => {
   if (err) {
     console.error('GPIO Error:', err);
     return;
   }
-  console.log("Shutdown button pressed → System fährt herunter");
-  require('child_process').exec('sudo shutdown -h now');
+  console.log('Shutdown Button gedrückt → System fährt runter');
+  exec('sudo shutdown -h now', (err, stdout, stderr) => {
+    if (err) console.error('Fehler beim Shutdown:', err);
+  });
 });
 
+// sauber schließen bei SIGINT
 process.on('SIGINT', () => {
   shutdownButton.unexport();
+  process.exit();
 });
 JS
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/index.js
@@ -59,14 +62,14 @@ sudo chown $VOLUSER:$VOLUSER $WORKDIR/index.js
 sudo -u $VOLUSER npm install --prefix $WORKDIR --production
 
 # 5) systemd Service
-sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null <<'SERVICE'
+sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null <<SERVICE
 [Unit]
-Description=Raspberry Pi Power Buttons (GPIO17 Shutdown)
+Description=Raspberry Pi Shutdown Button (GPIO17)
 After=multi-user.target
 
 [Service]
-ExecStart=/usr/bin/node /opt/power-buttons/index.js
-WorkingDirectory=/opt/power-buttons
+ExecStart=/usr/bin/node /opt/shutdown-button/index.js
+WorkingDirectory=/opt/shutdown-button
 Restart=always
 User=volumio
 Group=volumio
@@ -80,5 +83,5 @@ sudo systemctl daemon-reload
 sudo systemctl enable $SERVICE_NAME.service
 sudo systemctl restart $SERVICE_NAME.service
 
-echo "=== Power Buttons installation complete ==="
+echo "=== Shutdown Button Installation Complete ==="
 systemctl status $SERVICE_NAME.service --no-pager
