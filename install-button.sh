@@ -5,7 +5,7 @@ WORKDIR="/opt/shutdown-button"
 VOLUSER="volumio"
 SERVICE_NAME="shutdown-button"
 
-echo "=== Raspberry Pi Shutdown Button Installer (GPIO17, rpio) ==="
+echo "=== Raspberry Pi Shutdown Button Installer (GPIO27, rpio) ==="
 
 # 1) Arbeitsverzeichnis anlegen
 sudo mkdir -p $WORKDIR
@@ -16,10 +16,10 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 {
   "name": "shutdown-button",
   "version": "1.0.0",
-  "description": "Raspberry Pi shutdown button via GPIO17 (rpio)",
+  "description": "Raspberry Pi shutdown button via GPIO27",
   "main": "index.js",
   "dependencies": {
-    "rpio": "^3.3.1"
+    "rpio": "^2.4.2"
   },
   "author": "DasSchuppe",
   "license": "MIT"
@@ -34,22 +34,24 @@ sudo tee $WORKDIR/index.js > /dev/null <<'JS'
 const rpio = require('rpio');
 const { exec } = require('child_process');
 
-const SHUTDOWN_PIN = 17; // BCM17 / Pin 11
+// GPIO27 als Input mit Pull-Up
+// Taster zwischen Pin 27 und GND
+rpio.open(27, rpio.INPUT, rpio.PULL_UP);
 
-// rpio Setup: Input mit Pullup und Interrupt
-rpio.open(SHUTDOWN_PIN, rpio.INPUT, rpio.PULL_UP);
+console.log('Shutdown Button Service gestartet. GPIO27 überwacht.');
 
-console.log('Shutdown Button Service gestartet. GPIO17 überwacht.');
+setInterval(() => {
+    if (rpio.read(27) === 0) {  // LOW = Taster gedrückt
+        console.log('Shutdown Button gedrückt → System fährt runter');
+        exec('sudo shutdown -h now', (err, stdout, stderr) => {
+            if (err) console.error('Fehler beim Shutdown:', err);
+        });
+    }
+}, 200);
 
-rpio.poll(SHUTDOWN_PIN, (pin) => {
-    console.log('Shutdown Button gedrückt → System fährt runter');
-    exec('sudo shutdown -h now', (err, stdout, stderr) => {
-        if (err) console.error('Fehler beim Shutdown:', err);
-    });
-}, rpio.POLL_HIGH); // Trigger beim Drücken (High → Low wegen Pullup)
-
+// sauber schließen bei SIGINT
 process.on('SIGINT', () => {
-    rpio.close(SHUTDOWN_PIN, rpio.PIN_RESET);
+    rpio.close(27);
     process.exit();
 });
 JS
@@ -61,15 +63,15 @@ sudo -u $VOLUSER npm install --prefix $WORKDIR --production
 # 5) systemd Service
 sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null <<SERVICE
 [Unit]
-Description=Raspberry Pi Shutdown Button (GPIO17, rpio)
+Description=Raspberry Pi Shutdown Button (GPIO27, rpio)
 After=multi-user.target
 
 [Service]
 ExecStart=/usr/bin/node /opt/shutdown-button/index.js
 WorkingDirectory=/opt/shutdown-button
 Restart=always
-User=root
-Group=root
+User=volumio
+Group=volumio
 
 [Install]
 WantedBy=multi-user.target
