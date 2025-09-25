@@ -121,7 +121,7 @@ class LCM1602 {
   async goodbye() {
     await this.clear();
     await this.print('  Bis bald!', 0);
-    await this.print('  Volumio sagt', 1);
+    await this.print('  bei Volumio', 1);
     await sleep(2000);
   }
 
