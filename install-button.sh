@@ -4,9 +4,8 @@ set -e
 WORKDIR="/opt/shutdown-button"
 VOLUSER="volumio"
 SERVICE_NAME="shutdown-button"
-GPIO_PIN=17   # Du kannst hier auch 27 setzen, je nach Verfügbarkeit
 
-echo "=== Raspberry Pi Shutdown Button Installer (GPIO$GPIO_PIN) ==="
+echo "=== Raspberry Pi Shutdown Button Installer (GPIO17, rpio) ==="
 
 # 1) Arbeitsverzeichnis anlegen
 sudo mkdir -p $WORKDIR
@@ -17,10 +16,10 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 {
   "name": "shutdown-button",
   "version": "1.0.0",
-  "description": "Raspberry Pi shutdown button via GPIO",
+  "description": "Raspberry Pi shutdown button via GPIO17 (rpio)",
   "main": "index.js",
   "dependencies": {
-    "onoff": "^6.0.0"
+    "rpio": "^3.3.1"
   },
   "author": "DasSchuppe",
   "license": "MIT"
@@ -29,38 +28,30 @@ JSON
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/package.json
 
 # 3) index.js
-sudo tee $WORKDIR/index.js > /dev/null <<JS
+sudo tee $WORKDIR/index.js > /dev/null <<'JS'
 'use strict';
 
-const Gpio = require('onoff').Gpio;
+const rpio = require('rpio');
 const { exec } = require('child_process');
 
-const pin = parseInt(process.env.GPIO_PIN) || $GPIO_PIN;
+const SHUTDOWN_PIN = 17; // BCM17 / Pin 11
 
-// Input-Pin mit Pullup (Button auf GND)
-const shutdownButton = new Gpio(pin, 'in', 'falling', { debounceTimeout: 200 });
+// rpio Setup: Input mit Pullup und Interrupt
+rpio.open(SHUTDOWN_PIN, rpio.INPUT, rpio.PULL_UP);
 
-console.log('Shutdown Button Service gestartet. GPIO' + pin + ' überwacht.');
+console.log('Shutdown Button Service gestartet. GPIO17 überwacht.');
 
-shutdownButton.watch((err, value) => {
-    if (err) {
-        console.error('GPIO Fehler:', err);
-        return;
-    }
-    console.log('Shutdown Button gedrückt → System fährt herunter');
+rpio.poll(SHUTDOWN_PIN, (pin) => {
+    console.log('Shutdown Button gedrückt → System fährt runter');
     exec('sudo shutdown -h now', (err, stdout, stderr) => {
         if (err) console.error('Fehler beim Shutdown:', err);
     });
-});
+}, rpio.POLL_HIGH); // Trigger beim Drücken (High → Low wegen Pullup)
 
-// sauber schließen bei SIGINT/SIGTERM
-function cleanup() {
-    shutdownButton.unexport();
+process.on('SIGINT', () => {
+    rpio.close(SHUTDOWN_PIN, rpio.PIN_RESET);
     process.exit();
-}
-
-process.on('SIGINT', cleanup);
-process.on('SIGTERM', cleanup);
+});
 JS
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/index.js
 
@@ -70,16 +61,15 @@ sudo -u $VOLUSER npm install --prefix $WORKDIR --production
 # 5) systemd Service
 sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null <<SERVICE
 [Unit]
-Description=Raspberry Pi Shutdown Button (GPIO$GPIO_PIN)
+Description=Raspberry Pi Shutdown Button (GPIO17, rpio)
 After=multi-user.target
 
 [Service]
-ExecStart=/usr/bin/node $WORKDIR/index.js
-Environment=GPIO_PIN=$GPIO_PIN
-WorkingDirectory=$WORKDIR
+ExecStart=/usr/bin/node /opt/shutdown-button/index.js
+WorkingDirectory=/opt/shutdown-button
 Restart=always
-User=$VOLUSER
-Group=$VOLUSER
+User=root
+Group=root
 
 [Install]
 WantedBy=multi-user.target
@@ -90,5 +80,5 @@ sudo systemctl daemon-reload
 sudo systemctl enable $SERVICE_NAME.service
 sudo systemctl restart $SERVICE_NAME.service
 
-echo "=== Shutdown Button Installation Complete (GPIO$GPIO_PIN) ==="
+echo "=== Shutdown Button Installation Complete ==="
 systemctl status $SERVICE_NAME.service --no-pager
