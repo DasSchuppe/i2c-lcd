@@ -4,8 +4,9 @@ set -e
 WORKDIR="/opt/power-button"
 VOLUSER="volumio"
 SERVICE_NAME="power-button"
+SHUTDOWN_PIN=17   # GPIO17 (Pin 11) für Shutdown-Taster
 
-echo "=== Raspberry Pi Power Button Installer (Ein/Aus mit GPIO3) ==="
+echo "=== Raspberry Pi Power Button Installer (GPIO17) ==="
 
 # 1) Verzeichnis anlegen
 sudo mkdir -p $WORKDIR
@@ -16,7 +17,7 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 {
   "name": "power-button",
   "version": "1.0.0",
-  "description": "Single power button for Raspberry Pi (GPIO3)",
+  "description": "Single power button for Raspberry Pi (custom GPIO)",
   "main": "index.js",
   "dependencies": {
     "onoff": "^6.0.0"
@@ -32,33 +33,30 @@ sudo tee $WORKDIR/index.js > /dev/null <<'JS'
 'use strict';
 
 const Gpio = require('onoff').Gpio;
+const shutdownPin = new Gpio(${SHUTDOWN_PIN}, 'in', 'falling', { debounceTimeout: 200 });
 
-// GPIO3 (Pin 5) als Input mit Pullup
-// WICHTIG: Pi startet automatisch, wenn Pin 5 kurzzeitig auf GND gezogen wird.
-const powerButton = new Gpio(3, 'in', 'falling', { debounceTimeout: 200 });
-
-powerButton.watch((err, value) => {
+shutdownPin.watch((err, value) => {
   if (err) {
     console.error('GPIO Error:', err);
     return;
   }
-  console.log("Power button pressed → Shutdown");
+  console.log("Shutdown button pressed → System will halt");
   require('child_process').exec('sudo shutdown -h now');
 });
 
 process.on('SIGINT', () => {
-  powerButton.unexport();
+  shutdownPin.unexport();
 });
 JS
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/index.js
 
-# 4) Module installieren
+# 4) Node-Module installieren
 sudo -u $VOLUSER npm install --prefix $WORKDIR --production
 
 # 5) systemd Service
-sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null <<'SERVICE'
+sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null <<SERVICE
 [Unit]
-Description=Raspberry Pi Power Button (GPIO3)
+Description=Raspberry Pi Power Button (GPIO${SHUTDOWN_PIN})
 After=multi-user.target
 
 [Service]
