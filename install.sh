@@ -4,7 +4,7 @@ set -e
 WORKDIR="/opt/qapass-lcd"
 VOLUSER="volumio"
 
-echo "=== QAPASS / LCM1602 LCD Service Installer (Polling, saubere Version mit 4-Bit Init) ==="
+echo "=== QAPASS / LCM1602 LCD Service Installer (Polling + saubere Version mit Shutdown-Support) ==="
 echo "Arbeitsverzeichnis: $WORKDIR"
 echo "User: $VOLUSER"
 
@@ -16,8 +16,8 @@ sudo chown -R $VOLUSER:$VOLUSER $WORKDIR
 sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 {
   "name": "qapass-lcd-service",
-  "version": "1.0.0",
-  "description": "Display Volumio playback info on LCM1602 I2C LCD",
+  "version": "1.1.0",
+  "description": "Display Volumio playback info on LCM1602 I2C LCD with shutdown support",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -32,7 +32,7 @@ sudo tee $WORKDIR/package.json > /dev/null <<'JSON'
 JSON
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/package.json
 
-# 3) lib/lcd.js mit korrektem 4-Bit Init und sauberem Timing
+# 3) lib/lcd.js mit 4-Bit Init, Welcome + Shutdown + Goodbye
 sudo tee $WORKDIR/lib/lcd.js > /dev/null <<'JS'
 'use strict';
 const i2c = require('i2c-bus');
@@ -118,8 +118,23 @@ class LCM1602 {
     await this.print('    Volumio!     ',1);
   }
 
+  async goodbye() {
+    await this.clear();
+    await this.print('  Bis bald!', 0);
+    await this.print('  Volumio sagt', 1);
+    await sleep(2000);
+  }
+
   async shutdown() {
     await this.clear();
+    if (this.bus) { this.bus.closeSync(); this.bus = null; }
+  }
+
+  async powerOff() {
+    await this.goodbye();
+    // Backlight off
+    this.bus.writeByteSync(this.addr, 0, 0x00);
+    await sleep(50);
     if (this.bus) { this.bus.closeSync(); this.bus = null; }
   }
 }
@@ -128,7 +143,7 @@ module.exports = LCM1602;
 JS
 sudo chown -R $VOLUSER:$VOLUSER $WORKDIR/lib
 
-# 4) index.js (Polling alle 5 Sekunden, getrennt wie "Thread")
+# 4) index.js (Polling alle 5 Sekunden)
 sudo tee $WORKDIR/index.js > /dev/null <<'JS'
 'use strict';
 const LCM1602 = require('./lib/lcd');
@@ -166,16 +181,29 @@ const fetch = require('node-fetch');
     }
   }
 
-  // Polling-Loop (quasi "Thread")
+  // Polling-Loop
   setInterval(updateLCD, 5000);
 })();
 JS
 sudo chown $VOLUSER:$VOLUSER $WORKDIR/index.js
 
-# 5) Node-Module installieren
+# 5) shutdown.js
+sudo tee $WORKDIR/shutdown.js > /dev/null <<'JS'
+'use strict';
+const LCM1602 = require('./lib/lcd');
+
+(async () => {
+  const lcd = new LCM1602();
+  await lcd.init();
+  await lcd.powerOff();
+})();
+JS
+sudo chown $VOLUSER:$VOLUSER $WORKDIR/shutdown.js
+
+# 6) Node-Module installieren
 sudo -u $VOLUSER npm install --prefix $WORKDIR --production
 
-# 6) systemd Service
+# 7) systemd Service mit ExecStop
 sudo tee /etc/systemd/system/qapass-lcd.service > /dev/null <<'SERVICE'
 [Unit]
 Description=QAPASS / LCM1602 I2C LCD Service
@@ -183,6 +211,7 @@ After=network.target
 
 [Service]
 ExecStart=/usr/bin/node /opt/qapass-lcd/index.js
+ExecStop=/usr/bin/node /opt/qapass-lcd/shutdown.js
 WorkingDirectory=/opt/qapass-lcd
 Restart=always
 User=volumio
@@ -194,10 +223,10 @@ Nice=10
 WantedBy=multi-user.target
 SERVICE
 
-# 7) Service aktivieren und starten
+# 8) Service aktivieren und starten
 sudo systemctl daemon-reload
 sudo systemctl enable qapass-lcd.service
 sudo systemctl restart qapass-lcd.service
 
-echo "=== Installation complete ==="
+echo "=== Installation complete (mit Shutdown-Support) ==="
 systemctl status qapass-lcd.service --no-pager
